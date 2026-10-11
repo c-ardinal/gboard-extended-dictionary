@@ -1,0 +1,7 @@
+input/
+out/
+__pycache__/
+*.pyc
+*_lex.csv
+*_lex.zip
+dictionary0*.txt
