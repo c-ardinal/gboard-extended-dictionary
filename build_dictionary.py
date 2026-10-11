@@ -207,11 +207,11 @@ def parse_sizes(text):
 def write_zip(path, data):
     """Write a single-entry zip with fixed metadata so identical input gives identical bytes."""
     info = zipfile.ZipInfo("dictionary.txt", date_time=(1980, 1, 1, 0, 0, 0))
-    info.compress_type = zipfile.ZIP_DEFLATED
+    info.compress_type = zipfile.ZIP_STORED  # no zlib involved, so bytes match on every platform
     info.create_system = 3  # Unix, so the result does not depend on the build OS
     info.external_attr = 0o100644 << 16
     with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        zf.writestr(info, data)
 
 
 def write_outputs(entries, sizes, out_dir, stats):
