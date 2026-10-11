@@ -179,7 +179,7 @@ class PipelineTest(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(blobs[0])) as zf:
             info = zf.infolist()[0]
             self.assertEqual((info.filename, info.date_time, info.compress_type),
-                             ("dictionary.txt", (1980, 1, 1, 0, 0, 0), zipfile.ZIP_DEFLATED))
+                             ("dictionary.txt", (1980, 1, 1, 0, 0, 0), zipfile.ZIP_STORED))
 
     def test_drops_unconnected_rows(self):
         noun = ["名詞", "普通名詞", "一般"]

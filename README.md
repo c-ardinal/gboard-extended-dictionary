@@ -16,7 +16,7 @@ Gboard personal-dictionary word list, version 2, UTF-8 without BOM, LF line endi
 - Columns: reading (hiragana), word, `ja-JP`, part-of-speech label. Every row has exactly 4 columns.
 - The POS label is one of Gboard's Japanese labels. This build emits 名詞, 名詞サ変, 名詞形動, 固有名詞, 組織 and 人名.
 - Each `.zip` holds one entry, `dictionary.txt`, with the same content as the `.txt`.
-- Zips are reproducible for a given zlib: fixed timestamp (1980-01-01), fixed attributes, DEFLATE level 9.
+- Zips are byte-identical on every platform: fixed timestamp (1980-01-01), fixed attributes, stored without compression (size about equal to the .txt).
 
 ## Inputs (pinned)
 
