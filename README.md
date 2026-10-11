@@ -26,27 +26,42 @@ Gboard の単語リスト形式 version 2 です。文字コードは BOM なし
 |---|---|---|
 | SudachiDict small_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/small_lex.zip | e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706 |
 | SudachiDict core_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/core_lex.zip | d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf |
+| SudachiDict notcore_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/notcore_lex.zip | 75aa2d8cb855c7a44a326dc9f43f78cb6dc881caccb996e7559e2513b69cb0e1 |
 | Mozc OSS dictionary00-09.txt | https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/dictionary0N.txt | `tools/fetch_inputs.py` に記載 |
 
 `tools/fetch_inputs.py` を実行すると、これらを `input/` にダウンロードします。
-あわせて全ファイルの SHA-256 を照合し、2 つの CSV を取り出します。CI も同じスクリプトを使います。
+あわせて全ファイルの SHA-256 を照合し、3 つの CSV を取り出します。CI も同じスクリプトを使います。
 
 ## 実行方法（Python 3.12 以上、標準ライブラリのみ）
 
 ```
 python -I tools/fetch_inputs.py input
 python -I test_build_dictionary.py
-python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv --mozc-dir input/mozc --out out
+python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv --mozc-dir input/mozc --out out
 ```
 
 `--sizes` で出力する件数をカンマ区切りで指定できます。
 既定値は `1000,10000,50000,all` で、`all` はフィルタを通った全行を表します。
 
+`--base` に指定した CSV（small・core）から基本辞書を作ります。
+`--extra` は省略可能で、指定した CSV（notcore）から追加辞書を作ります。
+
 `out/` には次のファイルができます。
 
-- `sudachi-ja-{1k,10k,50k,all}.txt` と `.zip`：Sudachi のコストが低い順に上位 N 行を収めたもの（1k ⊂ 10k ⊂ 50k ⊂ all）
-- `stats.json`：フィルタの段階ごとの件数と、品詞別の内訳
+- `sudachi-ja-{1k,10k,50k,all}.txt` と `.zip`（基本辞書）：Sudachi のコストが低い順に上位 N 行を収めたもの（1k ⊂ 10k ⊂ 50k ⊂ all）
+- `sudachi-ja-notcore-extra.txt` と `.zip`（追加辞書、`--extra` を指定したときのみ）
+  - 基本辞書の all にない（読み, 表層形）の行だけを収めます。
+  - 並び順は、人名以外をコスト順に並べた後に人名をコスト順に並べたものです。人名は後ろに回ります。
+  - 上限は 100,000 行です。
+- `stats.json`：フィルタの段階ごとの件数と品詞別の内訳。追加辞書については、上限で切る前の件数（品詞別）と、実際に収録した人名の件数も記録します。
 - `sha256.txt`
+
+### 取り込み方
+
+まず基本辞書を、次に追加辞書をインポートしてください。
+
+Gboard が Mozc に渡せるのはユーザー辞書の合計 200,000 行までです。この上限には、自分で登録した単語も含まれます。
+基本辞書の all（約 87,000 行）と追加辞書（最大 100,000 行）を合わせても 200,000 行に収まるよう、追加辞書に上限を設けています。
 
 書き出した後、すべての出力を読み直して検査します。
 検査項目は、ヘッダ・列数 4・文字数・読みの文字種・品詞ラベル・CR や BOM がないことです。
@@ -66,6 +81,7 @@ python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv -
    - どこかに空白を含む、または表示用の互換文字を含む
      - 互換文字の範囲：文字様記号・数字の形（U+2100-218F）、囲み CJK 文字・CJK 互換用文字（U+3200-33FF）、CJK 互換漢字（U+F900-FAFF）
 3. **読み**：カタカナをひらがなに変換し（ヴ → ゔ、ー はそのまま）、英字は小文字にします。
+   区切り記号の「・」と「=」は取り除きます（まいける・じゃくそん → まいけるじゃくそん）。
    使える文字はひらがな・カタカナ・ー・`[0-9a-z]` だけで、長さは 256 文字までです。
 4. **変換しても意味がない語**：次のどちらかに当てはまる行は除外します。
    - 読みが表層形と同じ
@@ -74,6 +90,7 @@ python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv -
    - （読み, 表層形）が同じ行は、コストが最も低い 1 行だけを残します。
    - Mozc OSS 辞書に既にある表層形は除外します。
    - 残った行を Sudachi のコストが低い順に並べます。
+   - 基本辞書と追加辞書は別々にこの処理をします。そのうえで、基本辞書にある行は追加辞書から除きます。
 
 ## ライセンス
 
@@ -81,6 +98,7 @@ python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv -
 - **単語リスト**：生成される単語リストは [SudachiDict](https://github.com/WorksApplications/SudachiDict) の派生物です。
   SudachiDict は Apache License 2.0、Copyright (c) 2017-2023 Works Applications Co., Ltd. です。
   - SudachiDict には UniDic と NEologd の一部が含まれています。それぞれの表示は `NOTICE` に収録しています。
+  - `NOTICE` に収録した SudachiDict の LEGAL（v20260723）は small_lex・core_lex・notcore_lex の 3 ファイルすべてを対象としており、notcore にも同じ Apache-2.0 が適用されます。
   - 単語リストを配布するときは、`LICENSE` と `NOTICE` も一緒に配布してください。
 - **Mozc OSS 辞書**（BSD-3-Clause ほか、google/mozc に記載のライセンス）：
   ビルド時の除外フィルタとして使うだけで、再配布はしていません。

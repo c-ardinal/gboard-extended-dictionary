@@ -26,7 +26,7 @@ jobs:
       - name: Build
         run: >-
           python -I build_dictionary.py
-          --sudachi input/small_lex.csv input/core_lex.csv
+          --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv
           --mozc-dir input/mozc --out out
 
       - name: Self-check outputs
