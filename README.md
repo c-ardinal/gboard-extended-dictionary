@@ -1,11 +1,13 @@
 # gboard-extended-dictionary
 
-Japanese word lists for the Gboard "Extended Dictionary" patch, built from SudachiDict.
-Each list is a Gboard personal-dictionary file that can be imported as is.
+English: [README.en.md](README.en.md)
 
-## Output format
+Gboard の「Extended Dictionary」パッチで使う日本語単語リストを、SudachiDict から生成するリポジトリです。
+生成されるファイルは Gboard の単語リスト（ユーザー辞書）形式なので、そのままインポートできます。
 
-Gboard personal-dictionary word list, version 2, UTF-8 without BOM, LF line endings:
+## 出力形式
+
+Gboard の単語リスト形式 version 2 です。文字コードは BOM なしの UTF-8、改行は LF です。
 
 ```
 # Gboard Dictionary version:2
@@ -13,23 +15,23 @@ Gboard personal-dictionary word list, version 2, UTF-8 without BOM, LF line endi
 けんきゅう<TAB>研究<TAB>ja-JP<TAB>名詞サ変
 ```
 
-- Columns: reading (hiragana), word, `ja-JP`, part-of-speech label. Every row has exactly 4 columns.
-- The POS label is one of Gboard's Japanese labels. This build emits 名詞, 名詞サ変, 名詞形動, 固有名詞, 組織 and 人名.
-- Each `.zip` holds one entry, `dictionary.txt`, with the same content as the `.txt`.
-- Zips are byte-identical on every platform: fixed timestamp (1980-01-01), fixed attributes, stored without compression (size about equal to the .txt).
+- 列は「読み（ひらがな）」「単語」「`ja-JP`」「品詞」の順です。どの行もちょうど 4 列です。
+- 品詞は Gboard の日本語品詞ラベルを使います。このビルドが出力するのは 名詞・名詞サ変・名詞形動・固有名詞・組織・人名 の 6 種類です。
+- `.zip` には `dictionary.txt` が 1 つだけ入っており、中身は同名の `.txt` と同じです。
+- zip はどの環境で作ってもバイト単位で同じになります。日時は 1980-01-01、属性は固定で、圧縮せずに格納しています（サイズは `.txt` とほぼ同じです）。
 
-## Inputs (pinned)
+## 入力データ（バージョン固定）
 
-| Input | URL | SHA-256 |
+| 入力 | URL | SHA-256 |
 |---|---|---|
-| SudachiDict small_lex.zip (release v20260723) | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/small_lex.zip | e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706 |
-| SudachiDict core_lex.zip (release v20260723) | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/core_lex.zip | d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf |
-| Mozc OSS dictionary00-09.txt | https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/dictionary0N.txt | listed in `tools/fetch_inputs.py` |
+| SudachiDict small_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/small_lex.zip | e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706 |
+| SudachiDict core_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/core_lex.zip | d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf |
+| Mozc OSS dictionary00-09.txt | https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/dictionary0N.txt | `tools/fetch_inputs.py` に記載 |
 
-`tools/fetch_inputs.py` downloads all of them into `input/`, checks every SHA-256 and extracts the two CSVs.
-CI uses the same script.
+`tools/fetch_inputs.py` を実行すると、これらを `input/` にダウンロードします。
+あわせて全ファイルの SHA-256 を照合し、2 つの CSV を取り出します。CI も同じスクリプトを使います。
 
-## Run (Python 3.12+, stdlib only)
+## 実行方法（Python 3.12 以上、標準ライブラリのみ）
 
 ```
 python -I tools/fetch_inputs.py input
@@ -37,42 +39,48 @@ python -I test_build_dictionary.py
 python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv --mozc-dir input/mozc --out out
 ```
 
-`--sizes` takes a comma-separated list. The default is `1000,10000,50000,all`, where `all` means every filtered row.
+`--sizes` で出力する件数をカンマ区切りで指定できます。
+既定値は `1000,10000,50000,all` で、`all` はフィルタを通った全行を表します。
 
-The build writes these files to `out/`:
+`out/` には次のファイルができます。
 
-- `sudachi-ja-{1k,10k,50k,all}.txt` and `.zip`, the top-N rows by Sudachi cost (so 1k ⊂ 10k ⊂ 50k ⊂ all)
-- `stats.json`, with row counts at every filter stage and a POS breakdown
+- `sudachi-ja-{1k,10k,50k,all}.txt` と `.zip`：Sudachi のコストが低い順に上位 N 行を収めたもの（1k ⊂ 10k ⊂ 50k ⊂ all）
+- `stats.json`：フィルタの段階ごとの件数と、品詞別の内訳
 - `sha256.txt`
 
-Every output is re-parsed after writing (header, 4 columns, lengths, reading charset, POS label, no CR or BOM).
-The build fails if any row violates these rules.
+書き出した後、すべての出力を読み直して検査します。
+検査項目は、ヘッダ・列数 4・文字数・読みの文字種・品詞ラベル・CR や BOM がないことです。
+1 行でも違反があればビルドは失敗します。
 
-## Filters
+## フィルタ
 
-0. **Unconnected entries.** Drop rows with LeftId or RightId -1. These are Sudachi reference/variant entries that are not used for analysis, and they all have cost 0.
-1. **POS.** Keep only these Sudachi classes, mapped to Gboard labels:
-   - 名詞-普通名詞: サ変可能 → 名詞サ変, 形状詞可能 → 名詞形動, everything else → 名詞.
-   - 名詞-固有名詞: 一般 → 固有名詞, 組織名 → 組織, 人名 (excluding 姓 and 名) → 人名.
-   - Everything else is dropped: 地名, surname and given-name lists, verbs, adjectives, symbols, emoticons.
-2. **Surface.** Drop a row if its surface:
-   - contains control characters or has leading/trailing whitespace;
-   - is ASCII only;
-   - contains whitespace anywhere, or presentation forms: Letterlike Symbols / Number Forms (U+2100-218F),
-     Enclosed CJK / CJK Compatibility (U+3200-33FF) or CJK Compatibility Ideographs (U+F900-FAFF).
-3. **Reading.** Convert katakana to hiragana (ヴ → ゔ, ー kept) and lowercase ASCII.
-   Only hiragana, katakana, ー and `[0-9a-z]` are allowed, and the reading must be 256 characters or fewer.
-4. **No conversion value.** Drop the row if the reading equals the surface, or equals the surface converted to hiragana and lowercased.
-5. **Dedupe and novelty.** Dedupe on (reading, surface), keeping the lowest cost.
-   Drop surfaces that already appear in the Mozc OSS dictionary.
-   Sort by Sudachi cost, ascending.
+0. **解析に使われない項目**：LeftId または RightId が -1 の行は除外します。
+   これらは Sudachi の参照用・表記ゆれ用の項目で、形態素解析には使われません。コストがすべて 0 のため、残すと先頭に並んでしまいます。
+1. **品詞**：次の Sudachi の品詞だけを残し、Gboard のラベルに対応付けます。
+   - 名詞-普通名詞：サ変可能 → 名詞サ変、形状詞可能 → 名詞形動、それ以外 → 名詞
+   - 名詞-固有名詞：一般 → 固有名詞、組織名 → 組織、人名（姓・名を除く）→ 人名
+   - これ以外はすべて除外します（地名、姓・名の一覧、動詞、形容詞、記号、顔文字など）。
+2. **表層形（単語）**：次のどれかに当てはまる行は除外します。
+   - 制御文字を含む、または前後に空白がある
+   - ASCII 文字だけでできている
+   - どこかに空白を含む、または表示用の互換文字を含む
+     - 互換文字の範囲：文字様記号・数字の形（U+2100-218F）、囲み CJK 文字・CJK 互換用文字（U+3200-33FF）、CJK 互換漢字（U+F900-FAFF）
+3. **読み**：カタカナをひらがなに変換し（ヴ → ゔ、ー はそのまま）、英字は小文字にします。
+   使える文字はひらがな・カタカナ・ー・`[0-9a-z]` だけで、長さは 256 文字までです。
+4. **変換しても意味がない語**：次のどちらかに当てはまる行は除外します。
+   - 読みが表層形と同じ
+   - 読みが、表層形をひらがな化・小文字化したものと同じ
+5. **重複除去と既存語の除外**：
+   - （読み, 表層形）が同じ行は、コストが最も低い 1 行だけを残します。
+   - Mozc OSS 辞書に既にある表層形は除外します。
+   - 残った行を Sudachi のコストが低い順に並べます。
 
-## Licence
+## ライセンス
 
-- **Code:** the scripts in this repository are under the Apache License 2.0 (see `LICENSE`).
-- **Word lists:** the generated word lists are derived from [SudachiDict](https://github.com/WorksApplications/SudachiDict),
-  Apache License 2.0, Copyright (c) 2017-2023 Works Applications Co., Ltd.
-  - SudachiDict includes UniDic and a part of NEologd. Their notices are reproduced in `NOTICE`.
-  - Distribute `LICENSE` and `NOTICE` together with any word list.
-- **Mozc OSS dictionary** (BSD-3-Clause and the licences listed in google/mozc):
-  it is used only as an exclusion filter at build time and is not redistributed.
+- **コード**：このリポジトリのスクリプトは Apache License 2.0 です（`LICENSE` を参照）。
+- **単語リスト**：生成される単語リストは [SudachiDict](https://github.com/WorksApplications/SudachiDict) の派生物です。
+  SudachiDict は Apache License 2.0、Copyright (c) 2017-2023 Works Applications Co., Ltd. です。
+  - SudachiDict には UniDic と NEologd の一部が含まれています。それぞれの表示は `NOTICE` に収録しています。
+  - 単語リストを配布するときは、`LICENSE` と `NOTICE` も一緒に配布してください。
+- **Mozc OSS 辞書**（BSD-3-Clause ほか、google/mozc に記載のライセンス）：
+  ビルド時の除外フィルタとして使うだけで、再配布はしていません。
