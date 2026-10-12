@@ -17,15 +17,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Release assets of a private repository are not downloadable anonymously; fetch_inputs.py
-      # then finds the file in place and only verifies its sha256. Harmless once the repo is public.
-      - name: Download Wikidata snapshot (release asset)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release download wikidata-20261012 -R "${{ github.repository }}"
-          -p wikidata-p1814-ja-20261012.tsv -D input --clobber
-
       - name: Fetch pinned inputs (sha256 verified)
         run: python -I tools/fetch_inputs.py input
 
