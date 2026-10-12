@@ -265,6 +265,118 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(ex["stages"]["drop_in_base"], 1)
             self.assertEqual(report["outputs"][bd.EXTRA_NAME]["rows"], 2)
 
+    def test_wikidata_pos_table(self):
+        cases = {
+            ("Q5",): "人名", ("Q845945",): "地名", ("Q55488",): "地名", ("Q18663566",): "地名",
+            ("Q5358913",): "組織", ("Q43229",): "組織", ("Q7889",): "固有名詞", (): "固有名詞",
+            ("Q101352",): None, ("Q4167410",): None, ("Q5", "Q101352"): None,
+            ("Q16521",): None, ("Q23038290",): None, ("Q7432",): None,
+            ("Q5358913", "Q845945"): "組織", ("Q5", "Q43229"): "人名",
+        }
+        for p31s, label in cases.items():
+            self.assertEqual(bd.wikidata_pos(p31s), label, p31s)
+        groups = (bd.WIKIDATA_DROP, bd.WIKIDATA_PERSON, bd.WIKIDATA_ORGANISATION, bd.WIKIDATA_PLACE)
+        self.assertEqual(sum(map(len, groups)), len(set().union(*groups)))
+
+    def test_wikidata_filters(self):
+        rows = [r + ["1"] for r in [
+            ["Q1", "斎藤隆", "さいとう たかし", "Q5"],
+            ["Q2", "マイケル・ジャクソン", "マイケル・ジャクソン", "Q5"],
+            ["Q3", "東山(京都)", "ひがしやま", "Q8502"],
+            ["Q4", "東山（京都）", "ひがしやま", "Q8502"],
+            ["Q5", "長" * 33, "なが", ""],
+            ["Q6", "吉田", "よしだ", "Q101352"],
+            ["Q7", "飛鳥坐神社", "あすかにいますじんじゃ", "Q845945"],
+            ["Q7", "飛鳥坐神社", "あすかにますじんじゃ", "Q845945"],
+            ["Q8", "トヨタ", "とよた", ""],
+            ["Q9", "姶良市立建昌小学校", "けんしょう", "Q5358913"],
+            ["Q10", "りそなホールディングス", "だいわぎんほーるでぃんぐす", "Q4830453"],
+            ["Q11", "ㄱ", "きよく", ""],
+        ]]
+        stats = collections.Counter()
+        kept = [(r, s, p) for r, s, p, _ in bd.filter_wikidata(rows, stats)]
+        self.assertEqual(kept, [("さいとうたかし", "斎藤隆", "人名"), ("まいけるじゃくそん", "マイケル・ジャクソン", "人名"),
+                                ("あすかにいますじんじゃ", "飛鳥坐神社", "地名"), ("あすかにますじんじゃ", "飛鳥坐神社", "地名")])
+        self.assertEqual(stats["drop_kana_or_case_variant"], 1)
+        self.assertEqual(stats["reading_separators_removed"], 1)
+        self.assertEqual(stats["drop_parenthetical"], 2)
+        self.assertEqual(stats["drop_surface_over_32"], 1)
+        self.assertEqual(stats["drop_name_or_wikimedia_item"], 1)
+        self.assertEqual(stats["multi_reading_items"], 1)
+        self.assertEqual(stats["drop_reading_mismatch"], 2)
+        self.assertEqual(stats["drop_compat_surface"], 1)
+
+    def test_reading_matches_surface(self):
+        for reading, surface in (("みなみさつまし", "南さつま市"), ("まいけるじゃくそん", "マイケル・ジャクソン"),
+                                 ("ささきのぞみ", "佐々木希"), ("こーひーかん", "コーヒー館"),
+                                 ("ふじみがおかえき", "富士見ヶ丘駅"), ("いなむらがさきえき", "稲村ヵ崎駅"),
+                                 ("みとさつえ", "三戸サツヱ"), ("ささきたず", "佐々木たづ"), ("ぶぃら", "ヴィラ")):
+            self.assertTrue(bd.reading_matches_surface(reading, surface), surface)
+        for reading, surface in (("だいわぎんほーるでぃんぐす", "りそなホールディングス"),  # (a) kana missing
+                                 ("けんしょう", "姶良市立建昌小学校"),  # (b) shorter than the kanji count
+                                 ("らくさし", "さくら市"),  # (a) kana out of order
+                                 ("ふじみおかえき", "富士見ヶ丘駅のぞみ")):  # (a) kana missing even with ヶ skipped
+            self.assertFalse(bd.reading_matches_surface(reading, surface), surface)
+
+    def test_wikidata_orders_by_sitelinks_then_qid(self):
+        rows = [["Q30", "東山", "ひがしやま", "Q8502", "3"], ["Q20", "西山", "にしやま", "Q8502", "3"],
+                ["Q40", "北山", "きたやま", "Q8502", "50"]]
+        stats = collections.Counter()
+        entries = bd.select_entries(bd.dedupe(bd.filter_wikidata(rows, stats), stats), set(), stats)
+        self.assertEqual([e[1] for e in entries], ["北山", "西山", "東山"])
+
+    def test_wikidata_dedupe_keeps_higher_sitelinks(self):
+        rows = [["Q1", "東山", "ひがしやま", "Q8502", "2"], ["Q2", "東山", "ひがしやま", "Q5", "40"],
+                ["Q3", "東山", "ひがしやま", "Q43229", "40"]]
+        stats = collections.Counter()
+        best = bd.dedupe(bd.filter_wikidata(rows, stats), stats)
+        self.assertEqual(best, {("ひがしやま", "東山"): ("人名", (-40, 2))})
+        self.assertEqual(stats["drop_duplicate"], 2)
+
+    def test_hangul_surface_dropped(self):
+        noun = ["名詞", "固有名詞", "一般"]
+        rows = [row(s, 1, noun, r).rstrip("\n").split(",") for s, r in (
+            ("ㄱ", "キヨク"), ("가", "カ"), ("한국店", "ハングクテン"), ("韓国店", "カンコクテン"))]
+        stats = collections.Counter()
+        kept = [s for _, s, _, _ in bd.filter_entries(rows, stats, collections.Counter())]
+        self.assertEqual(kept, ["韓国店"])
+        self.assertEqual(stats["drop_compat_surface"], 3)
+
+    def test_place_label_passes_self_check(self):
+        self.assertEqual(bd.validate_text(bd.render([("ひがしやま", "東山", "地名")])), [])
+
+    def test_wikidata_deduped_against_base_and_extra(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base, extra, wd, mozc, out = (os.path.join(tmp, n) for n in (
+                "small_lex.csv", "notcore_lex.csv", "wikidata-p1814-ja-20261012.tsv", "mozc", "out"))
+            with open(base, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(CSV_HEADER + row("研究所", 100, ["名詞", "普通名詞", "一般"], "ケンキュウジョ"))
+            with open(extra, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(CSV_HEADER + row("某工業", 900, ["名詞", "固有名詞", "一般"], "ボウコウギョウ"))
+            with open(wd, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("qid\tlabel_ja\tkana\tp31s\tsitelinks\n"
+                         "Q10\t研究所\tけんきゅうじょ\tQ31855\t9\n"
+                         "Q11\t某工業\tボウコウギョウ\tQ4830453\t9\n"
+                         "Q12\t既存語\tきぞんご\t\t9\n"
+                         "Q13\t東山\tひがしやま\tQ8502\t2\n"
+                         "Q14\t斎藤隆\tさいとう たかし\tQ5\t5\n")
+            os.mkdir(mozc)
+            with open(os.path.join(mozc, "dictionary00.txt"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("きぞんご\t1\t1\t100\t既存語\n")
+            bd.main(["--base", base, "--extra", extra, "--wikidata", wd, "--mozc-dir", mozc, "--out", out,
+                     "--sizes", "all"])
+            with open(os.path.join(out, bd.WIKIDATA_NAME + ".txt"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertEqual(bd.validate_text(text), [])
+            self.assertEqual([tuple(l.split("\t")) for l in text.split("\n")[2:] if l],
+                             [("さいとうたかし", "斎藤隆", "ja-JP", "人名"), ("ひがしやま", "東山", "ja-JP", "地名")])
+            with open(os.path.join(out, "stats.json"), encoding="utf-8") as fh:
+                wd_report = json.load(fh)["wikidata"]
+            self.assertEqual(wd_report["stages"]["drop_in_sudachi_lists"], 2)
+            self.assertEqual(wd_report["stages"]["drop_in_mozc_oss"], 1)
+            self.assertEqual((wd_report["date"], wd_report["input_rows"]), ("20261012", 5))
+            self.assertEqual(len(wd_report["input_sha256"]), 64)
+
     def test_parse_sizes_all(self):
         self.assertEqual(bd.parse_sizes("1000,10000,50000,all"), [1000, 10000, 50000, None])
 

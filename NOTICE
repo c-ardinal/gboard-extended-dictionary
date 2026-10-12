@@ -20,6 +20,10 @@ format. SudachiDict includes UniDic and a part of NEologd; its LEGAL file
 Words present in the Mozc OSS dictionary (google/mozc, BSD-3-Clause) were
 used only as an exclusion filter; no Mozc data is redistributed.
 
+The optional list wikidata-ja-proper.txt / .zip is built from Wikidata
+(https://www.wikidata.org/), whose data is available under CC0 1.0. No
+attribution is required; this line is a courtesy acknowledgement.
+
 ----------------------------------------------------------------------
 SudachiDict LEGAL (verbatim)
 ----------------------------------------------------------------------

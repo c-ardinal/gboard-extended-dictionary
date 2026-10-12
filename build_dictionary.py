@@ -42,7 +42,8 @@ MIN_COLUMNS = 13
 _UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
 # Presentation forms and spacing, not words: Letterlike Symbols / Number Forms, Enclosed CJK,
 # CJK Compatibility, CJK Compatibility Ideographs, and any Unicode whitespace (incl. U+2003, U+3000).
-_COMPAT_CHARS = re.compile(r"[\u2100-\u218f\u3200-\u33ff\uf900-\ufaff\s]")
+# Hangul (Jamo, Compatibility Jamo, Syllables) is not Japanese input either.
+_COMPAT_CHARS = re.compile(r"[\u1100-\u11ff\u2100-\u218f\u3130-\u318f\u3200-\u33ff\uac00-\ud7af\uf900-\ufaff\s]")
 _READING_OK = re.compile(r"[\u3041-\u3096\u30a1-\u30fa\u30fc0-9a-z]+")
 # Word separators in Sudachi readings (\u307e\u3044\u3051\u308b\u30fb\u3058\u3083\u304f\u305d\u3093); removed rather than rejecting the row.
 _READING_SEPARATORS = re.compile("[\u30fb=]")
@@ -269,10 +270,176 @@ def order_extra(entries, base_keys, stats, cap=MAX_EXTRA_ROWS):
     return extra, ordered[:cap]
 
 
+# --- Wikidata (CC0) proper nouns -------------------------------------------------------------
+# P31 (instance of) -> Gboard POS. Precedence: drop > 人名 > 組織 > 地名; anything else -> 固有名詞.
+# Output order: sitelinks (number of Wikipedia/Wikimedia pages) descending, then QID ascending.
+# Built from the most frequent classes among items with a kana reading (P1814), 2026-10-12.
+WIKIDATA_NAME = "wikidata-ja-proper"
+WIKIDATA_HEADER = ("qid", "label_ja", "kana", "p31s", "sitelinks")
+WIKIDATA_MAX_SURFACE = 32
+WIKIDATA_DROP = {  # name lists and Wikimedia pages are not words
+    "Q101352", "Q19914123",  # family name, Japanese family name
+    "Q202444", "Q22812564", "Q12308941", "Q11879590", "Q3409032",  # given names (generic, ja, male, female, unisex)
+    "Q4167410", "Q13406463",  # disambiguation page, list article
+    # biological taxa (common nouns such as 偶蹄目, not proper nouns): taxon, fossil taxon, organisms known by
+    # a common name, monotypic taxon, clade, and rank classes
+    "Q16521", "Q23038290", "Q55983715", "Q310890", "Q713623",
+    "Q7432", "Q34740", "Q35409", "Q36602", "Q37517", "Q38348", "Q36732", "Q767728",
+}
+WIKIDATA_PERSON = {"Q5"}  # human
+WIKIDATA_ORGANISATION = {
+    "Q43229", "Q4830453", "Q6881511", "Q891723", "Q1480166", "Q163740", "Q327333",  # organisation, business, company...
+    "Q85907346", "Q10438042", "Q11086540", "Q5354754", "Q1616075", "Q18127",  # rail/bus companies, agencies, TV, label
+    "Q3914", "Q5358913", "Q55521176", "Q56351315", "Q43271061", "Q11396122",  # schools in Japan
+    "Q3918", "Q38723", "Q875538", "Q902104", "Q2385804", "Q31855", "Q11507944",  # universities, institutes
+}
+WIKIDATA_PLACE = {
+    # Shinto shrines and their classes
+    "Q845945", "Q134917286", "Q135160342", "Q135160338", "Q135022904", "Q135038714", "Q135100459", "Q135419779",
+    "Q11390939", "Q514480", "Q3200355", "Q11588442", "Q2370082", "Q11590310", "Q125316862", "Q11667187",
+    "Q798838", "Q125339990", "Q125316983", "Q125313404", "Q125314093", "Q125314171", "Q32512", "Q134987077",
+    "Q11451876", "Q11562963", "Q11355275", "Q118304363", "Q11646488", "Q137640533", "Q135009132", "Q11635468",
+    "Q134986959", "Q11488964", "Q11391618", "Q135009906", "Q135009973", "Q135009904", "Q1442984",
+    # Buddhist temples
+    "Q5393308", "Q11486287", "Q10901138",
+    # stations and stops
+    "Q55488", "Q4312270", "Q85882206", "Q123094976", "Q122397434", "Q4346602", "Q332496", "Q121844689",
+    "Q11670533", "Q2142091", "Q121844395", "Q1147171", "Q11606300", "Q22808404", "Q2175765", "Q928830",
+    "Q2451577", "Q105038730", "Q22808403", "Q123025722", "Q55485", "Q4663385", "Q55491", "Q6641445",
+    "Q124416148", "Q7886778", "Q11429081", "Q63125083", "Q123114662", "Q953806",
+    # municipalities (current and dissolved), districts, neighbourhoods, toponyms
+    "Q18663566", "Q494721", "Q1059478", "Q4174776", "Q137773", "Q1549591", "Q1137833", "Q15284", "Q515", "Q3957",
+    "Q5327369", "Q424857", "Q5327509", "Q65948724", "Q486972", "Q123705", "Q11484330", "Q7884789",
+    "Q1122846", "Q860290", "Q12357832", "Q56061", "Q1147395", "Q48336",
+    # nature, parks, hot springs
+    "Q8502", "Q4022", "Q2908753", "Q23442", "Q22698", "Q11643861", "Q11832860",
+    "Q655311", "Q11408869", "Q11428612", "Q11567142", "Q11587679", "Q11587674",
+    # roads, bridges, road facilities, castles, sites
+    "Q34442", "Q79007", "Q10276558", "Q46622", "Q16939396", "Q5409910", "Q285783", "Q2376564", "Q1788454",
+    "Q11313284", "Q785979", "Q60985097", "Q1364150", "Q12280", "Q537127", "Q1055465", "Q39715",
+    "Q92026", "Q839954", "Q1081138",
+}
+PLACE_POS, ORGANISATION_POS, PROPER_POS = "地名", "組織", "固有名詞"
+_DISAMBIGUATOR = re.compile("[(（]")
+_WHITESPACE = re.compile(r"\s+")
+_SURFACE_KANA = re.compile(r"[\u3041-\u3096\u30a1-\u30fa\u30fc]")
+_KANJI = re.compile(r"[\u3005\u3400-\u4dbf\u4e00-\u9fff]")
+# For the subsequence check only: \u30f6/\u30f5 (\u3096/\u3095 after conversion) are counters read \u304c/\u304b/\u3053, so they are skipped;
+# historical and voiced spellings are folded to the form a modern reading uses.
+_KANA_EQUIVALENCE = str.maketrans({"\u3090": "\u3044", "\u3091": "\u3048", "\u3062": "\u3058", "\u3065": "\u305a", "\u3094": "\u3076", "\u3095": None, "\u3096": None})
+
+
+def reading_matches_surface(reading, surface):
+    """False when the reading cannot belong to the whole surface (P1814 is the reading of the name, not the label).
+
+    (a) kana written in the surface must appear in the reading in the same order (as a subsequence),
+        after _KANA_EQUIVALENCE on both sides;
+    (b) the reading needs at least one character per kanji.
+    """
+    folded = reading.translate(_KANA_EQUIVALENCE)
+    surface_kana = "".join(_SURFACE_KANA.findall(katakana_to_hiragana(surface))).translate(_KANA_EQUIVALENCE)
+    position = 0
+    for char in surface_kana:
+        position = folded.find(char, position) + 1
+        if position == 0:
+            return False
+    return len(reading) >= len(_KANJI.findall(surface))
+
+
+def wikidata_pos(p31s):
+    """Map an item's P31 classes to a Gboard label, or None to drop the item."""
+    classes = set(p31s)
+    if classes & WIKIDATA_DROP:
+        return None
+    if classes & WIKIDATA_PERSON:
+        return NAME_POS
+    if classes & WIKIDATA_ORGANISATION:
+        return ORGANISATION_POS
+    if classes & WIKIDATA_PLACE:
+        return PLACE_POS
+    return PROPER_POS
+
+
+def iter_wikidata(path):
+    with open(path, encoding="utf-8", newline="") as fh:
+        header = tuple(fh.readline().rstrip("\r\n").split("\t"))
+        if header != WIKIDATA_HEADER:
+            raise SystemExit(f"{path}: unexpected TSV header {header}")
+        for line in fh:
+            yield line.rstrip("\r\n").split("\t")
+
+
+def filter_wikidata(rows, stats):
+    """Yield (reading, surface, pos, rank) for Wikidata rows passing the filters; rank = (-sitelinks, QID number)."""
+    readings_per_item = collections.Counter()
+    for row in rows:
+        stats["rows_in"] += 1
+        if len(row) != len(WIKIDATA_HEADER):
+            stats["drop_malformed_row"] += 1
+            continue
+        qid, surface, kana, p31s, sitelinks = row
+        readings_per_item[qid] += 1
+        pos = wikidata_pos(p31s.split(",") if p31s else [])
+        if pos is None:
+            stats["drop_name_or_wikimedia_item"] += 1
+            continue
+        if _DISAMBIGUATOR.search(surface):
+            stats["drop_parenthetical"] += 1
+            continue
+        if len(surface) > WIKIDATA_MAX_SURFACE:
+            stats["drop_surface_over_32"] += 1
+            continue
+        if not surface or has_bad_surface_chars(surface):
+            stats["drop_surface_chars"] += 1
+            continue
+        if surface.isascii():
+            stats["drop_ascii_surface"] += 1
+            continue
+        if _COMPAT_CHARS.search(surface):
+            stats["drop_compat_surface"] += 1
+            continue
+        if _READING_SEPARATORS.search(kana):
+            stats["reading_separators_removed"] += 1
+        reading = normalize_reading(_WHITESPACE.sub("", kana))
+        if reading is None:
+            stats["drop_reading_chars"] += 1
+            continue
+        if len(reading) > MAX_CHARS:
+            stats["drop_over_256"] += 1
+            continue
+        if reading == surface:
+            stats["drop_reading_eq_surface"] += 1
+            continue
+        if reading == katakana_to_hiragana(surface).lower():
+            stats["drop_kana_or_case_variant"] += 1
+            continue
+        if not reading_matches_surface(reading, surface):
+            stats["drop_reading_mismatch"] += 1
+            continue
+        stats["after_row_filters"] += 1
+        yield reading, surface, pos, (-int(sitelinks), int(qid[1:]))
+    stats["multi_reading_items"] = sum(1 for n in readings_per_item.values() if n > 1)
+
+
+def build_wikidata(path, mozc_surfaces, known_keys, stats):
+    """Wikidata rows not already in the Sudachi lists or Mozc OSS, most sitelinks first, then lowest QID."""
+    best = dedupe(filter_wikidata(iter_wikidata(path), stats), stats)
+    stats["after_dedupe"] = len(best)
+    fresh = {k: v for k, v in best.items() if k not in known_keys}
+    stats["drop_in_sudachi_lists"] = len(best) - len(fresh)
+    return select_entries(fresh, mozc_surfaces, stats)  # sorted by the rank in the "cost" slot
+
+
+def file_sha256(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--base", nargs="+", required=True, help="SudachiDict *_lex.csv for the base lists (small, core)")
     ap.add_argument("--extra", nargs="*", default=[], help="SudachiDict *_lex.csv for the extra list (notcore)")
+    ap.add_argument("--wikidata", help="TSV from tools/fetch_wikidata.py for the optional Wikidata list")
     ap.add_argument("--mozc-dir", required=True, help="directory with Mozc OSS dictionary0*.txt")
     ap.add_argument("--out", default="out")
     ap.add_argument("--sizes", type=parse_sizes, default=parse_sizes(DEFAULT_SIZES), help=f"comma list, 'all' = every row (default {DEFAULT_SIZES})")
@@ -313,6 +480,23 @@ def main(argv=None):
             "written_name_rows": sum(1 for e in extra if e[2] == NAME_POS),
         }
         files.append((EXTRA_NAME, extra))
+    if args.wikidata:
+        wd_stats = collections.Counter()
+        known = {e[:2] for e in entries}
+        if args.extra:
+            known |= {e[:2] for e in extra}  # the capped extra file as published
+        wikidata = build_wikidata(args.wikidata, mozc_surfaces, known, wd_stats)
+        name = os.path.basename(args.wikidata)
+        report["wikidata"] = {
+            "input": name,
+            "date": name.rsplit("-", 1)[-1].removesuffix(".tsv"),
+            "input_rows": wd_stats["rows_in"],
+            "input_sha256": file_sha256(args.wikidata),
+            "stages": dict(wd_stats),
+            "available_pos": dict(collections.Counter(e[2] for e in wikidata).most_common()),
+            "first_50k_pos": dict(collections.Counter(e[2] for e in wikidata[:50_000]).most_common()),
+        }
+        files.append((WIKIDATA_NAME, wikidata))
     write_outputs(files, args.out, report)
     report["elapsed_sec"] = round(time.monotonic() - started, 1)
     with open(os.path.join(args.out, "stats.json"), "w", encoding="utf-8", newline="\n") as fh:
