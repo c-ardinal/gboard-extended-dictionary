@@ -42,6 +42,7 @@ Fetch the Wikidata TSV first with `gh release download wikidata-20261012 -p wiki
 ```
 python -I tools/fetch_inputs.py input
 python -I test_build_dictionary.py
+python -I test_fetch_wikidata.py
 python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv --wikidata input/wikidata-p1814-ja-20261012.tsv --mozc-dir input/mozc --out out
 ```
 

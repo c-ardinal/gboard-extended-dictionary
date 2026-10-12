@@ -30,7 +30,9 @@ jobs:
         run: python -I tools/fetch_inputs.py input
 
       - name: Unit tests
-        run: python -I test_build_dictionary.py
+        run: |
+          python -I test_build_dictionary.py
+          python -I test_fetch_wikidata.py
 
       - name: Build
         run: >-
