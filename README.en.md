@@ -57,7 +57,7 @@ The build writes these files to `out/`:
   - It holds only rows whose (reading, surface) is not already in the base "all" list.
   - Order: rows other than 人名 by cost first, then 人名 rows by cost, so names go to the back.
   - It is capped at 100,000 rows.
-- `wikidata-ja-proper.txt` and `.zip` (Wikidata proper nouns; only with `--wikidata`, see below)
+- `wikidata-ja-proper-part1.txt`, `-part2.txt`, … and `.zip` (Wikidata proper nouns, split every 100,000 rows; only with `--wikidata`, see below)
 - `stats.json`, with row counts at every filter stage and a POS breakdown.
   For the extra list it also records the rows available before the cap (by POS) and how many 人名 rows made it in.
 - `sha256.txt`
@@ -69,6 +69,18 @@ Import the base dictionary first, then the extra one.
 Gboard hands at most 200,000 user-dictionary rows to Mozc in total, and your own entries count towards that limit.
 The extra cap keeps base "all" (about 87,000 rows) plus extra (at most 100,000 rows) under 200,000.
 
+### Split files
+
+The Extended Dictionary patch imports at most 100,000 rows and 8 MiB per file.
+A dictionary that exceeds either limit is written as `<name>-part1.txt`, `-part2.txt`, and so on, each with its own `.zip`.
+
+- Every part is a complete Gboard word list with both header lines, at most 100,000 rows and at most 8 MiB (the zip stays under 8 MiB too).
+- A dictionary that fits in one file keeps its plain name.
+- Row order is preserved across parts; for example, `wikidata-ja-proper-part1` holds the best-known names.
+- Import the parts in order, starting with part1.
+- `sha256.txt` lists every part, and `stats.json` records the number of parts and the rows in each.
+- Each part goes through the self-check after it is written.
+
 ### Size guidance
 
 On stock Gboard, Mozc ingests at most 200,000 personal-dictionary entries. The Extended Dictionary patch raises the limit to 1,000,000.
@@ -79,7 +91,7 @@ Approximate row counts per file:
 |---|---|
 | Base "all" | about 87,000 |
 | Extra | 100,000 |
-| Wikidata proper nouns | about 214,000 |
+| Wikidata proper nouns | about 214,000 (3 parts) |
 
 On stock Gboard, pick files so that the total stays under 200,000.
 The Wikidata file is ordered by notability (sitelinks descending), so a truncated copy still keeps the best-known names.
@@ -111,7 +123,7 @@ The build fails if any row violates these rules.
 
 ## Wikidata proper-noun dictionary (optional, prototype)
 
-`wikidata-ja-proper.txt` and `.zip` form a separate dictionary of proper nouns from Wikidata (CC0).
+`wikidata-ja-proper` (`-part1`, `-part2`, … as `.txt` and `.zip`) forms a separate dictionary of proper nouns from Wikidata (CC0).
 They are built only with `--wikidata` and are distributed as a file of their own, apart from the base and extra lists.
 
 - **Input:** the pinned TSV `wikidata-p1814-ja-<YYYYMMDD>.tsv`.

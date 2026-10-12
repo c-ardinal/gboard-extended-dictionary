@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -376,6 +377,52 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(wd_report["stages"]["drop_in_mozc_oss"], 1)
             self.assertEqual((wd_report["date"], wd_report["input_rows"]), ("20261012", 5))
             self.assertEqual(len(wd_report["input_sha256"]), 64)
+
+    def test_split_at_row_boundary(self):
+        entries = [("あ" + str(i), "亜" + str(i), "名詞", i) for i in range(100_001)]
+        self.assertEqual([len(p) for p in bd.split_parts(entries[:100_000])], [100_000])
+        parts = bd.split_parts(entries)
+        self.assertEqual([len(p) for p in parts], [100_000, 1])
+        self.assertEqual([e for p in parts for e in p], entries)  # order preserved
+        self.assertEqual(bd.split_parts([]), [[]])
+
+    def test_split_by_byte_budget(self):
+        entries = [("あ", "亜" * 10, "名詞", i) for i in range(10)]
+        row_bytes = len(bd.render_row(entries[0]).encode("utf-8"))
+        budget = len(bd.HEADER.encode("utf-8")) + 3 * row_bytes
+        self.assertEqual([len(p) for p in bd.split_parts(entries, max_bytes=budget)], [3, 3, 3, 1])
+        self.assertEqual(len(bd.split_parts(entries)), 1)  # well under the real 8 MiB budget
+
+    def test_large_output_written_as_parts(self):
+        entries = [("あ" + str(i), "亜" + str(i), "名詞", i) for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(bd, "MAX_PART_ROWS", 2):
+            stats = {"outputs": {}}
+            bd.write_outputs([("big", entries), ("small", entries[:2])], tmp, stats)
+            names = sorted(os.listdir(tmp))
+            self.assertEqual(names, ["big-part1.txt", "big-part1.zip", "big-part2.txt", "big-part2.zip",
+                                     "big-part3.txt", "big-part3.zip", "sha256.txt", "small.txt", "small.zip"])
+            surfaces = []
+            for i in (1, 2, 3):
+                with open(os.path.join(tmp, f"big-part{i}.txt"), encoding="utf-8") as fh:
+                    text = fh.read()
+                self.assertTrue(text.startswith(bd.HEADER))
+                self.assertEqual(bd.validate_text(text), [])
+                surfaces += [line.split("\t")[1] for line in text.split("\n")[2:] if line]
+            self.assertEqual(surfaces, [e[1] for e in entries])
+            self.assertEqual(stats["outputs"]["big"]["parts"],
+                             [{"name": "big-part1", "rows": 2}, {"name": "big-part2", "rows": 2},
+                              {"name": "big-part3", "rows": 1}])
+            with open(os.path.join(tmp, "sha256.txt"), encoding="utf-8") as fh:
+                self.assertEqual(len(fh.read().splitlines()), 8)
+
+    def test_self_check_enforces_part_limits(self):
+        row_line = "あ\t亜\tja-JP\t名詞\n"
+        with mock.patch.object(bd, "MAX_PART_ROWS", 2):
+            self.assertEqual(bd.validate_text(bd.HEADER + row_line * 2), [])
+            self.assertIn("more than 2 rows", bd.validate_text(bd.HEADER + row_line * 3))
+        with mock.patch.object(bd, "MAX_PART_BYTES", len((bd.HEADER + row_line).encode("utf-8"))):
+            self.assertEqual(bd.validate_text(bd.HEADER + row_line), [])
+            self.assertTrue(any("larger than" in e for e in bd.validate_text(bd.HEADER + row_line * 2)))
 
     def test_parse_sizes_all(self):
         self.assertEqual(bd.parse_sizes("1000,10000,50000,all"), [1000, 10000, 50000, None])

@@ -16,6 +16,11 @@ HEADER = (
 )
 LANGUAGE_TAG = "ja-JP"
 MAX_CHARS = 256
+# Per-file import limits of the Extended Dictionary patch; larger lists are written as -part1, -part2, ...
+MAX_PART_ROWS = 100_000
+MAX_PART_BYTES = 8 * 1024 * 1024
+ZIP_OVERHEAD_BYTES = 1024  # stored single-entry zip headers, so the .zip also stays within MAX_PART_BYTES
+PART_BYTE_BUDGET = MAX_PART_BYTES - ZIP_OVERHEAD_BYTES
 DEFAULT_SIZES = "1000,10000,50000,all"
 # Base "all" (about 85k) + extra must stay under the 200,000 rows Gboard hands to Mozc, with room for user entries.
 MAX_EXTRA_ROWS = 100_000
@@ -178,8 +183,13 @@ def select_entries(best, mozc_surfaces, stats):
     return [(reading, surface, pos, cost) for cost, reading, surface, pos in kept]
 
 
+def render_row(entry):
+    reading, surface, pos = entry[:3]
+    return f"{reading}\t{surface}\t{LANGUAGE_TAG}\t{pos}\n"
+
+
 def render(entries):
-    return HEADER + "".join(f"{r}\t{s}\t{LANGUAGE_TAG}\t{p}\n" for r, s, p, *_ in entries)
+    return HEADER + "".join(map(render_row, entries))
 
 
 def validate_text(text):
@@ -191,6 +201,10 @@ def validate_text(text):
         errors.append("CR present")
     if not text.startswith(HEADER):
         errors.append("header mismatch")
+    if len(text.encode("utf-8")) > MAX_PART_BYTES:
+        errors.append(f"file larger than {MAX_PART_BYTES} bytes")
+    if text.count("\n") - 2 > MAX_PART_ROWS:
+        errors.append(f"more than {MAX_PART_ROWS} rows")
     for no, line in enumerate(text.split("\n")[2:], start=3):
         if line == "":
             continue
@@ -229,28 +243,49 @@ def size_name(size):
     return f"sudachi-ja-{size // 1000}k" if size % 1000 == 0 else f"sudachi-ja-{size}"
 
 
+def split_parts(entries, max_rows=None, max_bytes=None):
+    """Split entries, in order, into parts that each render to at most max_rows rows and max_bytes bytes."""
+    max_rows = max_rows or MAX_PART_ROWS
+    max_bytes = max_bytes or PART_BYTE_BUDGET
+    parts, current, size = [], [], len(HEADER.encode("utf-8"))
+    for entry in entries:
+        row_bytes = len(render_row(entry).encode("utf-8"))
+        if current and (len(current) == max_rows or size + row_bytes > max_bytes):
+            parts.append(current)
+            current, size = [], len(HEADER.encode("utf-8"))
+        current.append(entry)
+        size += row_bytes
+    parts.append(current)
+    return parts
+
+
 def write_outputs(files, out_dir, stats):
-    """files: [(name, entries)]. Each is self-checked, written as .txt and .zip, and recorded in stats/sha256.txt."""
+    """files: [(name, entries)]. Each is split into importable parts, self-checked, written as .txt and .zip,
+    and recorded in stats/sha256.txt. A single part keeps the plain name; otherwise <name>-part1, -part2, ..."""
     os.makedirs(out_dir, exist_ok=True)
     checksums = []
     for name, subset in files:
-        text = render(subset)
-        errors = validate_text(text)
-        if errors:
-            raise SystemExit(f"self-check failed for {name}: {len(errors)} violations, first: {errors[0]}")
-        data = text.encode("utf-8")
-        txt_path = os.path.join(out_dir, name + ".txt")
-        with open(txt_path, "wb") as fh:
-            fh.write(data)
-        zip_path = os.path.join(out_dir, name + ".zip")
-        write_zip(zip_path, data)
-        for path in (txt_path, zip_path):
-            with open(path, "rb") as fh:
-                checksums.append(f"{hashlib.sha256(fh.read()).hexdigest()}  {os.path.basename(path)}\n")
+        parts = split_parts(subset)
+        part_names = [name] if len(parts) == 1 else [f"{name}-part{i}" for i in range(1, len(parts) + 1)]
+        for part_name, part in zip(part_names, parts):
+            text = render(part)
+            errors = validate_text(text)
+            if errors:
+                raise SystemExit(f"self-check failed for {part_name}: {len(errors)} violations, first: {errors[0]}")
+            data = text.encode("utf-8")
+            txt_path = os.path.join(out_dir, part_name + ".txt")
+            with open(txt_path, "wb") as fh:
+                fh.write(data)
+            zip_path = os.path.join(out_dir, part_name + ".zip")
+            write_zip(zip_path, data)
+            for path in (txt_path, zip_path):
+                with open(path, "rb") as fh:
+                    checksums.append(f"{hashlib.sha256(fh.read()).hexdigest()}  {os.path.basename(path)}\n")
         stats["outputs"][name] = {
             "rows": len(subset),
             "pos": dict(collections.Counter(e[2] for e in subset).most_common()),
             "cost_cutoff": subset[-1][3] if subset else None,
+            "parts": [{"name": n, "rows": len(p)} for n, p in zip(part_names, parts)],
         }
     with open(os.path.join(out_dir, "sha256.txt"), "w", encoding="utf-8", newline="\n") as fh:
         fh.writelines(checksums)
