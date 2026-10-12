@@ -28,16 +28,21 @@ Gboard の単語リスト形式 version 2 です。文字コードは BOM なし
 | SudachiDict core_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/core_lex.zip | d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf |
 | SudachiDict notcore_lex.zip（リリース v20260723） | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/notcore_lex.zip | 75aa2d8cb855c7a44a326dc9f43f78cb6dc881caccb996e7559e2513b69cb0e1 |
 | Mozc OSS dictionary00-09.txt | https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/dictionary0N.txt | `tools/fetch_inputs.py` に記載 |
+| Wikidata スナップショット（2026-10-12） | https://github.com/c-ardinal/gboard-extended-dictionary/releases/download/wikidata-20261012/wikidata-p1814-ja-20261012.tsv | 90c9d2eaa447ad45004ba853d67621d1ea4e1e964495a0e4ac48a0c499581950 |
 
 `tools/fetch_inputs.py` を実行すると、これらを `input/` にダウンロードします。
 あわせて全ファイルの SHA-256 を照合し、3 つの CSV を取り出します。CI も同じスクリプトを使います。
+
+リポジトリが非公開の間は、リリースの添付ファイルを認証なしではダウンロードできません。
+先に `gh release download wikidata-20261012 -p wikidata-p1814-ja-20261012.tsv -D input` で取得してください。
+`tools/fetch_inputs.py` は、既にあるファイルについては sha256 の照合だけを行います。
 
 ## 実行方法（Python 3.12 以上、標準ライブラリのみ）
 
 ```
 python -I tools/fetch_inputs.py input
 python -I test_build_dictionary.py
-python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv --mozc-dir input/mozc --out out
+python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv --wikidata input/wikidata-p1814-ja-20261012.tsv --mozc-dir input/mozc --out out
 ```
 
 `--sizes` で出力する件数をカンマ区切りで指定できます。
@@ -53,6 +58,7 @@ python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --ex
   - 基本辞書の all にない（読み, 表層形）の行だけを収めます。
   - 並び順は、人名以外をコスト順に並べた後に人名をコスト順に並べたものです。人名は後ろに回ります。
   - 上限は 100,000 行です。
+- `wikidata-ja-proper-part1.txt`, `-part2.txt`, … と `.zip`（Wikidata 固有名詞辞書。100,000 行ごとに分割。`--wikidata` を指定したときのみ。後述）
 - `stats.json`：フィルタの段階ごとの件数と品詞別の内訳。追加辞書については、上限で切る前の件数（品詞別）と、実際に収録した人名の件数も記録します。
 - `sha256.txt`
 
@@ -62,6 +68,33 @@ python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --ex
 
 Gboard が Mozc に渡せるのはユーザー辞書の合計 200,000 行までです。この上限には、自分で登録した単語も含まれます。
 基本辞書の all（約 87,000 行）と追加辞書（最大 100,000 行）を合わせても 200,000 行に収まるよう、追加辞書に上限を設けています。
+
+### ファイルの分割
+
+Extended Dictionary パッチは、1 ファイルあたり 100,000 行・8 MiB までしか取り込みません。
+これを超える辞書は、`<名前>-part1.txt`、`-part2.txt` … に分けて出力します（それぞれに `.zip` も付きます）。
+
+- 各パートはヘッダ 2 行を含む完全な Gboard 単語リストで、100,000 行以下・8 MiB 以下です（zip も 8 MiB 以下）。
+- 1 ファイルに収まる辞書は、従来どおり分割なしの名前で出力します。
+- 行の順序はパートをまたいでも保たれます。たとえば `wikidata-ja-proper-part1` には最も知名度の高い名前が入ります。
+- パートは part1 から順にインポートしてください。
+- `sha256.txt` にはすべてのパートを、`stats.json` には辞書ごとのパート数と各パートの行数を記録します。
+- 各パートはそれぞれ書き出し後のセルフチェックを通ります。
+
+### 件数の目安
+
+通常の Gboard では、Mozc が取り込むユーザー辞書は最大 200,000 件です。Extended Dictionary パッチを当てると 1,000,000 件まで増えます。
+
+各ファイルのおおよその件数は次のとおりです。
+
+| ファイル | 件数 |
+|---|---|
+| 基本辞書の all | 約 87,000 |
+| 追加辞書 | 100,000 |
+| Wikidata 固有名詞辞書 | 約 214,000（3 パート） |
+
+通常の Gboard を使う場合は、合計が 200,000 件に収まるようにファイルを選んでください。
+Wikidata 固有名詞辞書は知名度の高い順（sitelinks の多い順）に並んでいます。途中で切り詰めても、よく知られた名前から残ります。
 
 書き出した後、すべての出力を読み直して検査します。
 検査項目は、ヘッダ・列数 4・文字数・読みの文字種・品詞ラベル・CR や BOM がないことです。
@@ -80,6 +113,7 @@ Gboard が Mozc に渡せるのはユーザー辞書の合計 200,000 行まで�
    - ASCII 文字だけでできている
    - どこかに空白を含む、または表示用の互換文字を含む
      - 互換文字の範囲：文字様記号・数字の形（U+2100-218F）、囲み CJK 文字・CJK 互換用文字（U+3200-33FF）、CJK 互換漢字（U+F900-FAFF）
+   - ハングル（字母 U+1100-11FF、互換字母 U+3130-318F、音節 U+AC00-D7AF）を含む
 3. **読み**：カタカナをひらがなに変換し（ヴ → ゔ、ー はそのまま）、英字は小文字にします。
    区切り記号の「・」と「=」は取り除きます（まいける・じゃくそん → まいけるじゃくそん）。
    使える文字はひらがな・カタカナ・ー・`[0-9a-z]` だけで、長さは 256 文字までです。
@@ -92,6 +126,60 @@ Gboard が Mozc に渡せるのはユーザー辞書の合計 200,000 行まで�
    - 残った行を Sudachi のコストが低い順に並べます。
    - 基本辞書と追加辞書は別々にこの処理をします。そのうえで、基本辞書にある行は追加辞書から除きます。
 
+## Wikidata 固有名詞辞書（任意・試作）
+
+`wikidata-ja-proper`（`-part1`, `-part2`, … の `.txt` と `.zip`）は、Wikidata（CC0）の固有名詞から作る独立した辞書です。
+`--wikidata` を指定したときだけ生成され、基本辞書・追加辞書とは別ファイルとして配布します。
+
+- **入力:** バージョン固定の TSV `wikidata-p1814-ja-<YYYYMMDD>.tsv` です。
+  - 列は qid、label_ja、kana、p31s、sitelinks です。
+  - このリポジトリのリリース（タグ `wikidata-<YYYYMMDD>`）に添付ファイルとして置き、`tools/fetch_inputs.py` が他の入力と同じく sha256 を照合して取得します。
+  - 取得日・行数・sha256 は `stats.json` の `wikidata` に記録されます。
+  - Wikidata の内容と WDQS の結果は日々変わります。再現できる入力は、日付付きで固定したこの TSV だけです。
+- **新しいスナップショットの作り方:**
+  1. `python -I tools/fetch_wikidata.py input` を実行します。WDQS から取得し、TSV と `.sha256` を書き出します。同じ日付で再実行すると保存済みのファイルを使います。
+  2. TSV を、タグ `wikidata-<YYYYMMDD>` のリリースに添付ファイルとしてアップロードします。
+  3. `tools/fetch_inputs.py` の URL と sha256、ワークフローの `--wikidata` のパスを更新します。
+- **読み:** P1814（かな表記）を使います。空白と「・」「=」を取り除いてから、基本辞書と同じ規則で正規化します。
+- **品詞:** P31（分類）から決めます。対応表は `build_dictionary.py` にあります。
+  - 姓・名の項目、曖昧さ回避ページ、生物の分類群（偶蹄目など）→ 除外
+  - Q5（人間）→ 人名
+  - 学校・企業・団体 → 組織
+  - 神社・寺院・駅・市区町村（廃止を含む）・山・川・島・公園・道路など → 地名
+  - それ以外 → 固有名詞
+- **追加のフィルタ:**
+  - 括弧付きの曖昧さ回避（「(」「（」を含む表記）は除外します。
+  - 33 文字以上の表記は除外します。
+  - **読みと表記の不一致（drop_reading_mismatch）:** P1814 は「名前」のかな表記で、ラベル全体の読みとは限りません。次のどちらかに当てはまる行は除外します。
+    - 表記に含まれるかな（カタカナはひらがなにして比べ、ー も含む）が、同じ順番で読みの中に現れない（部分列になっていない）
+      - ヶ・ヵ（富士見ヶ丘 など）は「が」「か」とも読むので比較から外します。
+      - ゐ→い、ゑ→え、ぢ→じ、づ→ず、ゔ→ぶ は、表記と読みの両方で同じ文字とみなします。
+      - 例：りそなホールディングス ← だいわぎんほーるでぃんぐす
+    - 読みの文字数が、表記の漢字の数（々 を含む）より少ない
+      - 例：姶良市立建昌小学校 ← けんしょう
+  - 基本辞書の all・追加辞書・Mozc OSS 辞書に既にある語は除外します。
+- **並び順:** sitelinks（その項目がある Wikipedia などの記事数）の多い順、同数なら QID の小さい順です。
+  - 上限は設けず、条件を満たした行をすべて出力します。
+  - `stats.json` には、全体と先頭 5 万行の品詞別件数を参考として記録します。
+
+取得に使う SPARQL は次の 3 種類です。ラベルの取得は、sitelinks の結果から得た項目を 10,000 件ずつ VALUES に並べて POST します。
+
+```
+SELECT DISTINCT ?item ?class WHERE {
+  ?item wdt:P1814 ?kana ; wdt:P31 ?class .
+}
+
+SELECT DISTINCT ?item ?sitelinks WHERE {
+  ?item wdt:P1814 ?kana ; wikibase:sitelinks ?sitelinks .
+}
+
+SELECT ?item ?label ?kana WHERE {
+  VALUES ?item { wd:Q... }
+  ?item wdt:P1814 ?kana ; rdfs:label ?label .
+  FILTER(LANG(?label) = "ja")
+}
+```
+
 ## ライセンス
 
 - **コード**：このリポジトリのスクリプトは Apache License 2.0 です（`LICENSE` を参照）。
@@ -100,5 +188,6 @@ Gboard が Mozc に渡せるのはユーザー辞書の合計 200,000 行まで�
   - SudachiDict には UniDic と NEologd の一部が含まれています。それぞれの表示は `NOTICE` に収録しています。
   - `NOTICE` に収録した SudachiDict の LEGAL（v20260723）は small_lex・core_lex・notcore_lex の 3 ファイルすべてを対象としており、notcore にも同じ Apache-2.0 が適用されます。
   - 単語リストを配布するときは、`LICENSE` と `NOTICE` も一緒に配布してください。
+- **Wikidata 固有名詞辞書**：Wikidata のデータは CC0 1.0 なので、帰属表示は不要です。`NOTICE` には謝辞として 1 行だけ記載しています。
 - **Mozc OSS 辞書**（BSD-3-Clause ほか、google/mozc に記載のライセンス）：
   ビルド時の除外フィルタとして使うだけで、再配布はしていません。

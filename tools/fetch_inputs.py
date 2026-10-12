@@ -7,10 +7,14 @@ import zipfile
 
 SUDACHI = "https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/"
 MOZC = "https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/"
+# Wikidata snapshots made by tools/fetch_wikidata.py, published as release assets of this repository.
+WIKIDATA = "https://github.com/c-ardinal/gboard-extended-dictionary/releases/download/"
 INPUTS = [
     (SUDACHI + "small_lex.zip", "small_lex.zip", "e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706"),
     (SUDACHI + "core_lex.zip", "core_lex.zip", "d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf"),
     (SUDACHI + "notcore_lex.zip", "notcore_lex.zip", "75aa2d8cb855c7a44a326dc9f43f78cb6dc881caccb996e7559e2513b69cb0e1"),
+    (WIKIDATA + "wikidata-20261012/wikidata-p1814-ja-20261012.tsv", "wikidata-p1814-ja-20261012.tsv",
+     "90c9d2eaa447ad45004ba853d67621d1ea4e1e964495a0e4ac48a0c499581950"),
 ] + [
     (MOZC + f"dictionary0{i}.txt", f"mozc/dictionary0{i}.txt", sha) for i, sha in enumerate((
         "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",

@@ -17,6 +17,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Release assets of a private repository are not downloadable anonymously; fetch_inputs.py
+      # then finds the file in place and only verifies its sha256. Harmless once the repo is public.
+      - name: Download Wikidata snapshot (release asset)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download wikidata-20261012 -R "${{ github.repository }}"
+          -p wikidata-p1814-ja-20261012.tsv -D input --clobber
+
       - name: Fetch pinned inputs (sha256 verified)
         run: python -I tools/fetch_inputs.py input
 
@@ -27,6 +36,7 @@ jobs:
         run: >-
           python -I build_dictionary.py
           --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv
+          --wikidata input/wikidata-p1814-ja-20261012.tsv
           --mozc-dir input/mozc --out out
 
       - name: Self-check outputs
@@ -35,13 +45,13 @@ jobs:
           import glob, sys
           sys.path.insert(0, '.')
           import build_dictionary as bd
-          for path in sorted(glob.glob('out/sudachi-ja-*.txt')):
+          for path in sorted(glob.glob('out/sudachi-ja-*.txt') + glob.glob('out/wikidata-ja-*.txt')):
               errors = bd.validate_text(open(path, encoding='utf-8', newline='').read())
               print(path, 'violations:', len(errors))
               if errors:
                   sys.exit(errors[0])
           "
-          for f in out/sudachi-ja-*.txt; do
+          for f in out/sudachi-ja-*.txt out/wikidata-ja-*.txt; do
             test "$(awk -F'\t' 'NR>2 && NF!=4' "$f" | wc -l)" -eq 0
           done
           cat out/sha256.txt
@@ -51,6 +61,7 @@ jobs:
           name: dictionary
           path: |
             out/sudachi-ja-*.txt
+            out/wikidata-ja-*.txt
             out/*.zip
             out/sha256.txt
             out/stats.json
@@ -73,5 +84,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Built from SudachiDict v20260723. See NOTICE."
-          gh release upload "$TAG" out/sudachi-ja-*.txt out/*.zip out/sha256.txt out/stats.json LICENSE NOTICE --clobber
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Built from SudachiDict v20260723 and Wikidata 20261012. See NOTICE."
+          gh release upload "$TAG" out/sudachi-ja-*.txt out/wikidata-ja-*.txt out/*.zip out/sha256.txt out/stats.json LICENSE NOTICE --clobber
