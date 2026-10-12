@@ -189,6 +189,6 @@ SELECT ?item ?label ?kana WHERE {
   - SudachiDict には UniDic と NEologd の一部が含まれています。それぞれの表示は `NOTICE` に収録しています。
   - `NOTICE` に収録した SudachiDict の LEGAL（v20260723）は small_lex・core_lex・notcore_lex の 3 ファイルすべてを対象としており、notcore にも同じ Apache-2.0 が適用されます。
   - 単語リストを配布するときは、`LICENSE` と `NOTICE` も一緒に配布してください。
-- **Wikidata 固有名詞辞書**：Wikidata のデータは CC0 1.0 なので、帰属表示は不要です。`NOTICE` には謝辞として 1 行だけ記載しています。
+- **Wikidata 固有名詞辞書**：Wikidata のデータは CC0 1.0 で提供されており、ライセンス上の帰属表示義務はありませんが、本プロジェクトは Wikidata コミュニティの成果に感謝し、`NOTICE` に出典と謝辞を記載しています。
 - **Mozc OSS 辞書**（BSD-3-Clause ほか、google/mozc に記載のライセンス）：
   ビルド時の除外フィルタとして使うだけで、再配布はしていません。

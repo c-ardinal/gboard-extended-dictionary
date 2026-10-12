@@ -183,6 +183,6 @@ SELECT ?item ?label ?kana WHERE {
   - SudachiDict includes UniDic and a part of NEologd. Their notices are reproduced in `NOTICE`.
   - The SudachiDict LEGAL file in `NOTICE` (v20260723) covers all three files (small_lex, core_lex and notcore_lex), so notcore is under the same Apache-2.0 terms.
   - Distribute `LICENSE` and `NOTICE` together with any word list.
-- **Wikidata proper-noun dictionary:** Wikidata data is CC0 1.0, so no attribution is required. `NOTICE` carries a single courtesy line.
+- **Wikidata proper-noun dictionary:** Wikidata data is released under CC0 1.0, which does not legally require attribution; we nevertheless credit the Wikidata community in `NOTICE` with gratitude for their work.
 - **Mozc OSS dictionary** (BSD-3-Clause and the licences listed in google/mozc):
   it is used only as an exclusion filter at build time and is not redistributed.
