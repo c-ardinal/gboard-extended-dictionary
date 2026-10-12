@@ -26,9 +26,10 @@ Gboard personal-dictionary word list, version 2, UTF-8 without BOM, LF line endi
 |---|---|---|
 | SudachiDict small_lex.zip (release v20260723) | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/small_lex.zip | e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706 |
 | SudachiDict core_lex.zip (release v20260723) | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/core_lex.zip | d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf |
+| SudachiDict notcore_lex.zip (release v20260723) | https://sudachi.s3-ap-northeast-1.amazonaws.com/sudachidict-raw/v1/20260723/notcore_lex.zip | 75aa2d8cb855c7a44a326dc9f43f78cb6dc881caccb996e7559e2513b69cb0e1 |
 | Mozc OSS dictionary00-09.txt | https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876be19600e61ac00/src/data/dictionary_oss/dictionary0N.txt | listed in `tools/fetch_inputs.py` |
 
-`tools/fetch_inputs.py` downloads all of them into `input/`, checks every SHA-256 and extracts the two CSVs.
+`tools/fetch_inputs.py` downloads all of them into `input/`, checks every SHA-256 and extracts the three CSVs.
 CI uses the same script.
 
 ## Run (Python 3.12+, stdlib only)
@@ -36,16 +37,31 @@ CI uses the same script.
 ```
 python -I tools/fetch_inputs.py input
 python -I test_build_dictionary.py
-python -I build_dictionary.py --sudachi input/small_lex.csv input/core_lex.csv --mozc-dir input/mozc --out out
+python -I build_dictionary.py --base input/small_lex.csv input/core_lex.csv --extra input/notcore_lex.csv --mozc-dir input/mozc --out out
 ```
 
 `--sizes` takes a comma-separated list. The default is `1000,10000,50000,all`, where `all` means every filtered row.
 
+`--base` takes the CSVs for the base dictionary (small and core).
+`--extra` is optional and takes the CSVs for the extra dictionary (notcore).
+
 The build writes these files to `out/`:
 
-- `sudachi-ja-{1k,10k,50k,all}.txt` and `.zip`, the top-N rows by Sudachi cost (so 1k ⊂ 10k ⊂ 50k ⊂ all)
-- `stats.json`, with row counts at every filter stage and a POS breakdown
+- `sudachi-ja-{1k,10k,50k,all}.txt` and `.zip` (base), the top-N rows by Sudachi cost (so 1k ⊂ 10k ⊂ 50k ⊂ all)
+- `sudachi-ja-notcore-extra.txt` and `.zip` (extra; only with `--extra`)
+  - It holds only rows whose (reading, surface) is not already in the base "all" list.
+  - Order: rows other than 人名 by cost first, then 人名 rows by cost, so names go to the back.
+  - It is capped at 100,000 rows.
+- `stats.json`, with row counts at every filter stage and a POS breakdown.
+  For the extra list it also records the rows available before the cap (by POS) and how many 人名 rows made it in.
 - `sha256.txt`
+
+### Importing
+
+Import the base dictionary first, then the extra one.
+
+Gboard hands at most 200,000 user-dictionary rows to Mozc in total, and your own entries count towards that limit.
+The extra cap keeps base "all" (about 87,000 rows) plus extra (at most 100,000 rows) under 200,000.
 
 Every output is re-parsed after writing (header, 4 columns, lengths, reading charset, POS label, no CR or BOM).
 The build fails if any row violates these rules.
@@ -63,11 +79,13 @@ The build fails if any row violates these rules.
    - contains whitespace anywhere, or presentation forms: Letterlike Symbols / Number Forms (U+2100-218F),
      Enclosed CJK / CJK Compatibility (U+3200-33FF) or CJK Compatibility Ideographs (U+F900-FAFF).
 3. **Reading.** Convert katakana to hiragana (ヴ → ゔ, ー kept) and lowercase ASCII.
+   Remove the separators ・ and = (まいける・じゃくそん → まいけるじゃくそん).
    Only hiragana, katakana, ー and `[0-9a-z]` are allowed, and the reading must be 256 characters or fewer.
 4. **No conversion value.** Drop the row if the reading equals the surface, or equals the surface converted to hiragana and lowercased.
 5. **Dedupe and novelty.** Dedupe on (reading, surface), keeping the lowest cost.
    Drop surfaces that already appear in the Mozc OSS dictionary.
    Sort by Sudachi cost, ascending.
+   Base and extra each go through these steps separately. Rows that are already in base are then removed from extra.
 
 ## Licence
 
@@ -75,6 +93,7 @@ The build fails if any row violates these rules.
 - **Word lists:** the generated word lists are derived from [SudachiDict](https://github.com/WorksApplications/SudachiDict),
   Apache License 2.0, Copyright (c) 2017-2023 Works Applications Co., Ltd.
   - SudachiDict includes UniDic and a part of NEologd. Their notices are reproduced in `NOTICE`.
+  - The SudachiDict LEGAL file in `NOTICE` (v20260723) covers all three files (small_lex, core_lex and notcore_lex), so notcore is under the same Apache-2.0 terms.
   - Distribute `LICENSE` and `NOTICE` together with any word list.
 - **Mozc OSS dictionary** (BSD-3-Clause and the licences listed in google/mozc):
   it is used only as an exclusion filter at build time and is not redistributed.

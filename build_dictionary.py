@@ -17,6 +17,10 @@ HEADER = (
 LANGUAGE_TAG = "ja-JP"
 MAX_CHARS = 256
 DEFAULT_SIZES = "1000,10000,50000,all"
+# Base "all" (about 85k) + extra must stay under the 200,000 rows Gboard hands to Mozc, with room for user entries.
+MAX_EXTRA_ROWS = 100_000
+EXTRA_NAME = "sudachi-ja-notcore-extra"
+NAME_POS = "人名"
 
 # arrays.xml:2510-2556 of Gboard 18.0.3 (item 0 is the placeholder; the rest are real labels).
 GBOARD_POS_ITEMS = (
@@ -40,6 +44,8 @@ _UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
 # CJK Compatibility, CJK Compatibility Ideographs, and any Unicode whitespace (incl. U+2003, U+3000).
 _COMPAT_CHARS = re.compile(r"[\u2100-\u218f\u3200-\u33ff\uf900-\ufaff\s]")
 _READING_OK = re.compile(r"[\u3041-\u3096\u30a1-\u30fa\u30fc0-9a-z]+")
+# Word separators in Sudachi readings (\u307e\u3044\u3051\u308b\u30fb\u3058\u3083\u304f\u305d\u3093); removed rather than rejecting the row.
+_READING_SEPARATORS = re.compile("[\u30fb=]")
 
 
 def unescape(text):
@@ -52,8 +58,8 @@ def katakana_to_hiragana(text):
 
 
 def normalize_reading(raw):
-    """Return a hiragana reading, or None if it contains anything but kana, ー or ASCII letters/digits."""
-    reading = katakana_to_hiragana(unescape(raw)).lower()
+    """Return a hiragana reading without ・/= separators, or None if anything but kana, ー or [0-9a-z] remains."""
+    reading = _READING_SEPARATORS.sub("", katakana_to_hiragana(unescape(raw)).lower())
     return reading if _READING_OK.fullmatch(reading) else None
 
 
@@ -119,6 +125,8 @@ def filter_entries(rows, stats, dropped_pos):
         if _COMPAT_CHARS.search(surface):
             stats["drop_compat_surface"] += 1
             continue
+        if _READING_SEPARATORS.search(row[COL_READING]):
+            stats["reading_separators_removed"] += 1
         reading = normalize_reading(row[COL_READING])
         if reading is None:
             stats["drop_reading_chars"] += 1
@@ -176,7 +184,7 @@ def render(entries):
 def validate_text(text):
     """Re-parse with the importer's column rules; return a list of violation messages (empty = valid)."""
     errors = []
-    if text.startswith("﻿"):
+    if text.startswith(chr(0xFEFF)):
         errors.append("BOM present")
     if "\r" in text:
         errors.append("CR present")
@@ -214,19 +222,21 @@ def write_zip(path, data):
         zf.writestr(info, data)
 
 
-def write_outputs(entries, sizes, out_dir, stats):
+def size_name(size):
+    if size is None:
+        return "sudachi-ja-all"
+    return f"sudachi-ja-{size // 1000}k" if size % 1000 == 0 else f"sudachi-ja-{size}"
+
+
+def write_outputs(files, out_dir, stats):
+    """files: [(name, entries)]. Each is self-checked, written as .txt and .zip, and recorded in stats/sha256.txt."""
     os.makedirs(out_dir, exist_ok=True)
     checksums = []
-    for size in sizes:
-        subset = entries[:size]  # size None = every filtered row
+    for name, subset in files:
         text = render(subset)
         errors = validate_text(text)
         if errors:
-            raise SystemExit(f"self-check failed for top-{size}: {len(errors)} violations, first: {errors[0]}")
-        if size is None:
-            name = "sudachi-ja-all"
-        else:
-            name = f"sudachi-ja-{size // 1000}k" if size % 1000 == 0 else f"sudachi-ja-{size}"
+            raise SystemExit(f"self-check failed for {name}: {len(errors)} violations, first: {errors[0]}")
         data = text.encode("utf-8")
         txt_path = os.path.join(out_dir, name + ".txt")
         with open(txt_path, "wb") as fh:
@@ -245,9 +255,24 @@ def write_outputs(entries, sizes, out_dir, stats):
         fh.writelines(checksums)
 
 
+def build_entries(paths, mozc_surfaces, stats, dropped_pos):
+    best = dedupe(filter_entries(iter_sudachi_rows(paths), stats, dropped_pos), stats)
+    stats["after_dedupe"] = len(best)
+    return select_entries(best, mozc_surfaces, stats)
+
+
+def order_extra(entries, base_keys, stats, cap=MAX_EXTRA_ROWS):
+    """Rows not already in base; non-人名 first, then 人名, each by cost; cut to cap."""
+    extra = [e for e in entries if e[:2] not in base_keys]
+    stats["drop_in_base"] = len(entries) - len(extra)
+    ordered = sorted(extra, key=lambda e: (e[2] == NAME_POS, e[3], e[0], e[1]))
+    return extra, ordered[:cap]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--sudachi", nargs="+", required=True, help="SudachiDict *_lex.csv files (small, core)")
+    ap.add_argument("--base", nargs="+", required=True, help="SudachiDict *_lex.csv for the base lists (small, core)")
+    ap.add_argument("--extra", nargs="*", default=[], help="SudachiDict *_lex.csv for the extra list (notcore)")
     ap.add_argument("--mozc-dir", required=True, help="directory with Mozc OSS dictionary0*.txt")
     ap.add_argument("--out", default="out")
     ap.add_argument("--sizes", type=parse_sizes, default=parse_sizes(DEFAULT_SIZES), help=f"comma list, 'all' = every row (default {DEFAULT_SIZES})")
@@ -257,17 +282,15 @@ def main(argv=None):
     mozc_files = sorted(glob.glob(os.path.join(args.mozc_dir, "dictionary*.txt")))
     if not mozc_files:
         raise SystemExit(f"no dictionary*.txt under {args.mozc_dir}")
+    mozc_surfaces = load_mozc_surfaces(mozc_files)
     stats = collections.Counter()
     dropped_pos = collections.Counter()
-    best = dedupe(filter_entries(iter_sudachi_rows(args.sudachi), stats, dropped_pos), stats)
-    stats["after_dedupe"] = len(best)
-    mozc_surfaces = load_mozc_surfaces(mozc_files)
-    entries = select_entries(best, mozc_surfaces, stats)
+    entries = build_entries(args.base, mozc_surfaces, stats, dropped_pos)
     if len(entries) < max((s for s in args.sizes if s is not None), default=0):
         print(f"warning: only {len(entries)} entries available", file=sys.stderr)
 
     report = {
-        "inputs": [os.path.basename(p) for p in args.sudachi],
+        "inputs": [os.path.basename(p) for p in args.base],
         "mozc_files": len(mozc_files),
         "mozc_surfaces": len(mozc_surfaces),
         "stages": dict(stats),
@@ -275,7 +298,22 @@ def main(argv=None):
         "dropped_pos_top": dict(dropped_pos.most_common(30)),
         "outputs": {},
     }
-    write_outputs(entries, args.sizes, args.out, report)
+    files = [(size_name(size), entries[:size]) for size in args.sizes]
+    if args.extra:
+        extra_stats = collections.Counter()
+        extra_all = build_entries(args.extra, mozc_surfaces, extra_stats, collections.Counter())
+        available, extra = order_extra(extra_all, {e[:2] for e in entries}, extra_stats)
+        report["extra"] = {
+            "inputs": [os.path.basename(p) for p in args.extra],
+            "stages": dict(extra_stats),
+            "available": len(available),
+            "available_pos": dict(collections.Counter(e[2] for e in available).most_common()),
+            "cap": MAX_EXTRA_ROWS,
+            "written": len(extra),
+            "written_name_rows": sum(1 for e in extra if e[2] == NAME_POS),
+        }
+        files.append((EXTRA_NAME, extra))
+    write_outputs(files, args.out, report)
     report["elapsed_sec"] = round(time.monotonic() - started, 1)
     with open(os.path.join(args.out, "stats.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(report, fh, ensure_ascii=False, indent=1)

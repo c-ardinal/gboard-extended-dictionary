@@ -10,6 +10,7 @@ MOZC = "https://raw.githubusercontent.com/google/mozc/ff395cea46fe1438948e2fa876
 INPUTS = [
     (SUDACHI + "small_lex.zip", "small_lex.zip", "e49936daef64043657752eb9f4ada912cf0316e26dd158a6200c770e2f93e706"),
     (SUDACHI + "core_lex.zip", "core_lex.zip", "d8ed376d8ff368226314a43151ab02591378dd344bff017d8a93ae9839212edf"),
+    (SUDACHI + "notcore_lex.zip", "notcore_lex.zip", "75aa2d8cb855c7a44a326dc9f43f78cb6dc881caccb996e7559e2513b69cb0e1"),
 ] + [
     (MOZC + f"dictionary0{i}.txt", f"mozc/dictionary0{i}.txt", sha) for i, sha in enumerate((
         "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",

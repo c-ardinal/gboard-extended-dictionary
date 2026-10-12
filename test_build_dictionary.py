@@ -48,7 +48,7 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(bd.normalize_reading("ABC123"), "abc123")
 
     def test_rejects_kanji_space_and_symbol_readings(self):
-        for bad in ("カン字", "アダム スミス", "ア・イ", "ア\tイ", ""):
+        for bad in ("カン字", "アダム スミス", "ア、イ", "・","ア\tイ", ""):
             self.assertIsNone(bd.normalize_reading(bad), bad)
 
     def test_pos_mapping(self):
@@ -76,7 +76,7 @@ class UnitTest(unittest.TestCase):
         good = bd.render([("けんきゅう", "研究", "名詞")])
         self.assertEqual(bd.validate_text(good), [])
         for bad in (good + "a\tb\tja-JP\n", good + "a\tb\tja-JP\t名詞\textra\n", good.replace("\n", "\r\n"),
-                    "﻿" + good, good.replace("version:2", "version:1"), good + "漢\tb\tja-JP\t名詞\n",
+                    chr(0xFEFF) + good, good.replace("version:2", "version:1"), good + "漢\tb\tja-JP\t名詞\n",
                     good + "a\tb\tja-JP\t謎\n", good + "a\t" + "b" * 257 + "\tja-JP\t名詞\n"):
             self.assertNotEqual(bd.validate_text(bad), [], repr(bad[-40:]))
 
@@ -92,7 +92,7 @@ class PipelineTest(unittest.TestCase):
             with open(os.path.join(mozc, "dictionary00.txt"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write("きぞんご\t1\t1\t100\t既存語\n")
             out = os.path.join(tmp, "out")
-            bd.main(["--sudachi", csv_path, "--mozc-dir", mozc, "--out", out, "--sizes", "2,100,all"])
+            bd.main(["--base", csv_path, "--mozc-dir", mozc, "--out", out, "--sizes", "2,100,all"])
 
             with open(os.path.join(out, "sudachi-ja-100.txt"), "rb") as fh:
                 data = fh.read()
@@ -136,7 +136,7 @@ class PipelineTest(unittest.TestCase):
 
     def test_write_outputs_fails_on_bad_row(self):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(SystemExit):
-            bd.write_outputs([("a b", "x", "名詞", 0)], [1], tmp, {"outputs": {}})
+            bd.write_outputs([("bad", [("a b", "x", "名詞", 0)])], tmp, {"outputs": {}})
 
     def test_drops_kana_and_case_variants_keeps_kanji(self):
         noun = ["名詞", "普通名詞", "一般"]
@@ -172,7 +172,7 @@ class PipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             for run in ("a", "b"):
                 out = os.path.join(tmp, run)
-                bd.write_outputs(entries, [None], out, {"outputs": {}})
+                bd.write_outputs([("sudachi-ja-all", entries)], out, {"outputs": {}})
                 with open(os.path.join(out, "sudachi-ja-all.zip"), "rb") as fh:
                     blobs.append(fh.read())
         self.assertEqual(blobs[0], blobs[1])
@@ -213,6 +213,57 @@ class PipelineTest(unittest.TestCase):
             with open(bare, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(data_line)
             self.assertEqual([r[0] for r in bd.iter_sudachi_rows([bare])], ["研究"])
+
+    def test_reading_separators_removed(self):
+        self.assertEqual(bd.normalize_reading("マイケル・ジャクソン"), "まいけるじゃくそん")
+        self.assertEqual(bd.normalize_reading("アン=マリー"), "あんまりー")
+        noun = ["名詞", "固有名詞", "人名", "一般"]
+        rows = [row("マイケル・ジャクソン氏", 1, noun, "マイケル・ジャクソンシ").rstrip("\n").split(","),
+                row("研究", 1, ["名詞", "普通名詞", "一般"], "ケンキュウ").rstrip("\n").split(",")]
+        stats = collections.Counter()
+        kept = [(r, s) for r, s, _, _ in bd.filter_entries(rows, stats, collections.Counter())]
+        self.assertEqual(kept, [("まいけるじゃくそんし", "マイケル・ジャクソン氏"), ("けんきゅう", "研究")])
+        self.assertEqual(stats["reading_separators_removed"], 1)
+
+    def test_extra_puts_names_last_and_caps(self):
+        entries = [("a", "A", "人名", 1), ("b", "B", "名詞", 5), ("c", "C", "固有名詞", 3), ("d", "D", "人名", 2)]
+        stats = collections.Counter()
+        available, ordered = bd.order_extra(entries, {("b", "B")}, stats, cap=3)
+        self.assertEqual(len(available), 3)
+        self.assertEqual(stats["drop_in_base"], 1)
+        self.assertEqual([e[1] for e in ordered], ["C", "A", "D"])
+        _, capped = bd.order_extra(entries, set(), collections.Counter(), cap=2)
+        self.assertEqual([e[1] for e in capped], ["C", "B"])
+
+    def test_base_extra_split_end_to_end(self):
+        common = row("研究", 100, ["名詞", "普通名詞", "サ変可能"], "ケンキュウ")
+        name = ["名詞", "固有名詞", "人名", "一般"]
+        with tempfile.TemporaryDirectory() as tmp:
+            base, extra, mozc, out = (os.path.join(tmp, n) for n in ("small_lex.csv", "notcore_lex.csv", "mozc", "out"))
+            with open(base, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(CSV_HEADER + common)
+            with open(extra, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(CSV_HEADER + common.replace(",100,", ",50,")
+                         + row("山田花子", -500, name, "ヤマダハナコ")
+                         + row("某工業", 900, ["名詞", "固有名詞", "一般"], "ボウコウギョウ"))
+            os.mkdir(mozc)
+            with open(os.path.join(mozc, "dictionary00.txt"), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("きぞんご\t1\t1\t100\t既存語\n")
+            bd.main(["--base", base, "--extra", extra, "--mozc-dir", mozc, "--out", out, "--sizes", "all"])
+            with open(os.path.join(out, "sudachi-ja-all.txt"), encoding="utf-8") as fh:
+                self.assertEqual([l.split("\t")[1] for l in fh.read().split("\n")[2:] if l], ["研究"])
+            with open(os.path.join(out, bd.EXTRA_NAME + ".txt"), encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertEqual(bd.validate_text(text), [])
+            self.assertEqual([l.split("\t")[1] for l in text.split("\n")[2:] if l], ["某工業", "山田花子"])
+            self.assertTrue(os.path.exists(os.path.join(out, bd.EXTRA_NAME + ".zip")))
+            with open(os.path.join(out, "stats.json"), encoding="utf-8") as fh:
+                report = json.load(fh)
+            ex = report["extra"]
+            self.assertEqual((ex["available"], ex["written"], ex["written_name_rows"], ex["cap"]), (2, 2, 1, bd.MAX_EXTRA_ROWS))
+            self.assertEqual(ex["available_pos"], {"固有名詞": 1, "人名": 1})
+            self.assertEqual(ex["stages"]["drop_in_base"], 1)
+            self.assertEqual(report["outputs"][bd.EXTRA_NAME]["rows"], 2)
 
     def test_parse_sizes_all(self):
         self.assertEqual(bd.parse_sizes("1000,10000,50000,all"), [1000, 10000, 50000, None])

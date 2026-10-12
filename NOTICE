@@ -11,7 +11,7 @@ License, Version 2.0:
    Copyright (c) 2017-2023 Works Applications Co., Ltd.
    https://github.com/WorksApplications/SudachiDict
 
-Modifications: noun entries of small_lex.csv and core_lex.csv (release
+Modifications: noun entries of small_lex.csv, core_lex.csv and notcore_lex.csv (release
 v20260723) were filtered, their readings converted from katakana to
 hiragana, and the result re-encoded in the Gboard personal-dictionary
 format. SudachiDict includes UniDic and a part of NEologd; its LEGAL file
